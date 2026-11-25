@@ -1,0 +1,573 @@
+<!--
+  FPL projections page. Single source of truth -- edit this, then run
+  build_embed.py; never hand-edit wp_page.html or projections_table.html.
+
+  Modeled on ff_utilization/component.html (same look, same build rules):
+    - no "//" line comments inside <script> (the build collapses it to one line)
+    - no innerHTML (WordPress's force_balance_tags mangles tag-shaped strings)
+    - no "[table"-style brackets in the script (WordPress shortcodes)
+
+  Placeholder filled at build time:
+    __DATA_SOURCE__  a JS expression yielding the data JSON (or a Promise of it)
+
+  Free page: no s2If paywall blocks, no teaser. The FPL Copilot credit banner
+  is REQUIRED by the partnership wherever the numbers show -- don't remove it.
+-->
+<!-- F6P_FPL:START -->
+<div id="f6p-fpl">
+  <div class="fpc-bar-bar">
+    <a class="fpc-link" href="https://fplcopilot.com/?ref=fantasysixpack" target="_blank" rel="noopener" aria-label="Visit FPL Copilot"></a>
+    <span class="fpc-row">
+      <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;flex:0 0 34px;border-radius:50%;background:#18181B;box-shadow:0 0 0 1px rgba(34,197,94,0.5),0 0 12px -2px rgba(34,197,94,0.55);">
+        <img src="https://fplcopilot.com/logo.png" alt="" width="34" height="34" style="width:34px;height:34px;border-radius:50%;display:block;object-fit:cover;" />
+      </span>
+      <span class="fpc-word">Prediction data powered by <span style="color:#22c55e;">FPL Copilot</span></span>
+      <span class="fpc-w">
+        <button type="button" class="fpc-i" aria-label="What happens when I click this?" aria-describedby="fpc-tip-bar">i</button>
+        <span id="fpc-tip-bar" class="fpc-tip" role="tooltip">Open FPL Copilot to see how to win your mini-league and when to play your chips.</span>
+      </span>
+      <span class="fpc-right">
+        <span class="fpc-go" aria-hidden="true"><span class="fpc-go-t">Visit FPL Copilot</span>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style="flex:0 0 16px;"><path d="M5 12h14M13 6l6 6-6 6" stroke="#22c55e" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+      </span>
+    </span>
+  </div>
+
+  <details class="f6p-key">
+    <summary>What do these columns mean?</summary>
+    <p class="f6p-note">
+      Every number is an <b>expected</b> value for the gameweek from FPL Copilot's model, which
+      re-runs when bookmaker odds move or team news lands. A double gameweek adds both
+      fixtures together; a blank gameweek is zero. Price and Rost% come from the official
+      FPL site.
+    </p>
+    <dl>
+      <dt>£ / Rost%</dt><dd>Current FPL price, and the share of FPL managers who roster the player.</dd>
+      <dt>Opp</dt><dd>Opponent. "vs" is a home game, "@" is away.</dd>
+      <dt>xMin</dt><dd>Expected minutes.</dd>
+      <dt>Start% / 60+%</dt><dd>Chance he starts, and chance he plays 60 minutes or more (needed for clean sheet points and the second appearance point).</dd>
+      <dt>xP</dt><dd>Expected FPL points. The nine columns to its right are where those points come from, and they add up to xP (give or take rounding).</dd>
+      <dt>xG / xA</dt><dd>Expected goals (penalties included) and expected assists.</dd>
+      <dt>CS%</dt><dd>His team's chance of keeping a clean sheet.</dd>
+    </dl>
+    <p class="f6p-note"><b>Points breakdown</b> (expected points from each way to score):</p>
+    <dl>
+      <dt>App</dt><dd>Appearance: 1 point for playing, 1 more for 60+ minutes.</dd>
+      <dt>Gls / Ast</dt><dd>Goals and assists.</dd>
+      <dt>CS / GC</dt><dd>Clean sheet points, and the deduction for goals conceded (keepers and defenders).</dd>
+      <dt>Svs</dt><dd>Keeper saves (1 point per 3 saves).</dd>
+      <dt>DC</dt><dd>Defensive contributions: 2 points for reaching 10 (defenders) or 12 (midfielders and forwards) clearances, blocks, interceptions, tackles and recoveries.</dd>
+      <dt>Bon / Crd</dt><dd>Bonus points, and the deduction for yellow and red cards.</dd>
+    </dl>
+    <p class="f6p-note">
+      <b>Gameweek</b> shows one gameweek. <b>Range</b> adds the selected gameweeks together for
+      each player; <b>Per GW</b> divides those totals by the number of gameweeks. Start%, 60+%
+      and CS% are averaged over his fixtures.
+    </p>
+  </details>
+
+  <div class="f6p-viewswitch"></div>
+  <div class="f6p-controls"></div>
+  <div class="f6p-stamp"></div>
+  <div class="f6p-meta"></div>
+  <div class="f6p-scroll">
+    <table class="f6p-table">
+      <thead><tr></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&display=swap');
+/* Same palette and furniture as the usage tool (light-only, like the site). */
+#f6p-fpl{
+  --f6p-surface:#FFFFFF;
+  --f6p-head:#cc5e03; --f6p-head-fg:#FFFFFF; --f6p-head-active:#660000;
+  --f6p-ink:#1F2328; --f6p-ink-2:#5A6675; --f6p-ink-3:#8794A4;
+  --f6p-line:#DFE3E8; --f6p-line-2:#EDF0F3;
+  --f6p-accent:#cc5e03; --f6p-accent-soft:#FCF2E9;
+  --f6p-rule:#1F2328;
+  --f6p-label:"Barlow Condensed",'Arial Narrow',sans-serif;
+  font:400 15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  color:var(--f6p-ink);
+}
+#f6p-fpl *{box-sizing:border-box}
+
+/* FPL Copilot credit banner -- partner-supplied styling, kept as given. */
+#f6p-fpl .fpc-bar-bar{position:relative;display:flex;align-items:center;gap:12px;box-sizing:border-box;width:100%;min-height:54px;padding:9px 12px 9px 10px;margin-bottom:14px;font-family:Inter,system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;border-radius:11px;background:linear-gradient(90deg,rgba(34,197,94,0.14) 0%,rgba(15,18,22,0.96) 30%,rgba(15,18,22,0.96) 100%);border:1px solid rgba(34,197,94,0.30);box-shadow:0 1px 0 rgba(255,255,255,0.04) inset,0 6px 18px -12px rgba(34,197,94,0.5);-webkit-tap-highlight-color:transparent;transition:border-color .18s,box-shadow .18s,transform .18s;}
+#f6p-fpl .fpc-bar-bar:hover{border-color:rgba(34,197,94,0.6);box-shadow:0 8px 22px -12px rgba(34,197,94,0.65);transform:translateY(-1px);}
+#f6p-fpl .fpc-bar-bar .fpc-link{position:absolute;inset:0;z-index:1;border-radius:11px;cursor:pointer;}
+#f6p-fpl .fpc-bar-bar .fpc-row{position:relative;z-index:2;display:flex;align-items:center;gap:10px;width:100%;pointer-events:none;}
+#f6p-fpl .fpc-bar-bar .fpc-word{font-size:15px;font-weight:700;color:#f4fbf6;white-space:nowrap;}
+#f6p-fpl .fpc-bar-bar .fpc-right{margin-left:auto;display:inline-flex;align-items:center;gap:10px;flex:0 0 auto;}
+#f6p-fpl .fpc-bar-bar .fpc-go{display:inline-flex;align-items:center;gap:6px;padding:7px 12px;border-radius:999px;background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.35);font-size:12px;font-weight:700;color:#bbf7d0;white-space:nowrap;}
+@media (max-width:540px){#f6p-fpl .fpc-bar-bar .fpc-go-t{display:none}#f6p-fpl .fpc-bar-bar .fpc-go{padding:7px;}#f6p-fpl .fpc-bar-bar .fpc-word{font-size:13px;white-space:normal}}
+#f6p-fpl .fpc-bar-bar .fpc-w{position:relative;z-index:3;pointer-events:auto;display:inline-flex;flex:0 0 auto;}
+#f6p-fpl .fpc-bar-bar .fpc-i{width:26px;height:26px;flex:0 0 26px;display:inline-flex;align-items:center;justify-content:center;border-radius:50%;border:1px solid rgba(34,197,94,0.4);background:rgba(34,197,94,0.12);color:#22c55e;font-size:12px;font-weight:700;cursor:help;padding:0;line-height:1;font-family:Georgia,'Times New Roman',serif;font-style:italic;}
+#f6p-fpl .fpc-bar-bar .fpc-tip{position:absolute;top:34px;left:0;z-index:50;width:264px;max-width:74vw;opacity:0;visibility:hidden;transform:translateY(4px);transition:opacity .16s,transform .16s,visibility .16s;padding:11px 13px;border-radius:12px;background:#0c0e12;border:1px solid rgba(34,197,94,0.3);box-shadow:0 14px 32px -12px rgba(0,0,0,0.75);font-size:12px;line-height:1.45;color:#dbeee2;text-align:left;font-weight:500;}
+#f6p-fpl .fpc-bar-bar .fpc-w:hover .fpc-tip,#f6p-fpl .fpc-bar-bar .fpc-w:focus-within .fpc-tip{opacity:1;visibility:visible;transform:translateY(0);}
+
+/* Column key -- same look as the usage tool's key. */
+#f6p-fpl .f6p-key{border:1px solid var(--f6p-line);border-radius:9px;background:var(--f6p-surface);padding:2px 16px;margin-bottom:16px}
+#f6p-fpl .f6p-key summary{padding:12px 0;cursor:pointer;list-style:none;font-family:var(--f6p-label);font-weight:600;font-size:14px;letter-spacing:.02em;color:var(--f6p-accent);display:flex;align-items:center;gap:8px}
+#f6p-fpl .f6p-key summary::-webkit-details-marker{display:none}
+#f6p-fpl .f6p-key summary::before{content:"\25B8";display:inline-block;transition:transform .15s ease;font-size:12px}
+#f6p-fpl .f6p-key[open] summary::before{transform:rotate(90deg)}
+#f6p-fpl .f6p-note{margin:0 0 14px;font-size:13px;line-height:1.6;color:var(--f6p-ink-2);max-width:70ch}
+#f6p-fpl .f6p-key dl{margin:0 0 14px;font-size:13.5px}
+#f6p-fpl .f6p-key dt{font-weight:600;color:var(--f6p-ink);margin-top:9px}
+#f6p-fpl .f6p-key dt:first-child{margin-top:0}
+#f6p-fpl .f6p-key dd{margin:2px 0 0;color:var(--f6p-ink-2);line-height:1.5}
+#f6p-fpl .f6p-key b{color:var(--f6p-ink)}
+
+#f6p-fpl .f6p-viewswitch{margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px 18px}
+#f6p-fpl .f6p-viewswitch .f6p-seg{gap:6px}
+#f6p-fpl .f6p-viewswitch .f6p-seg button{padding:9px 22px;font-size:14px;font-weight:600;border-width:2px}
+#f6p-fpl .f6p-controls{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:12px;padding-top:12px;border-top:1px solid var(--f6p-line)}
+#f6p-fpl .f6p-grp{display:flex;align-items:center;gap:6px}
+#f6p-fpl .f6p-grp label{font-family:var(--f6p-label);font-weight:600;font-size:12px;letter-spacing:.11em;text-transform:uppercase;color:var(--f6p-ink-3);margin:0}
+#f6p-fpl .f6p-dash{color:var(--f6p-ink-3);font-size:13px}
+#f6p-fpl select,#f6p-fpl input,#f6p-fpl .f6p-controls button,#f6p-fpl .f6p-viewswitch button{
+  font:500 13px/1 inherit;font-family:inherit;color:var(--f6p-ink);
+  background:var(--f6p-surface);border:1px solid var(--f6p-line);
+  border-radius:6px;padding:7px 10px;margin:0;height:auto;width:auto
+}
+#f6p-fpl input{min-width:190px}
+#f6p-fpl .f6p-controls button,#f6p-fpl .f6p-viewswitch button{cursor:pointer;text-transform:none;letter-spacing:normal}
+#f6p-fpl .f6p-controls button:hover,#f6p-fpl .f6p-viewswitch button:hover{border-color:var(--f6p-accent);color:var(--f6p-accent)}
+#f6p-fpl :focus-visible{outline:2px solid var(--f6p-accent);outline-offset:2px}
+#f6p-fpl .f6p-seg{gap:4px}
+#f6p-fpl .f6p-seg button.on{background:var(--f6p-accent);border-color:var(--f6p-accent);color:#fff}
+#f6p-fpl .f6p-meta{font-family:var(--f6p-label);font-weight:500;font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--f6p-ink-3);margin-bottom:8px;display:flex;flex-wrap:wrap;gap:4px 14px}
+#f6p-fpl .f6p-meta b{color:var(--f6p-ink);font-weight:600}
+/* Update time + deadline: the freshness line readers check before trusting
+   the numbers, so it sits right above the table in body text, not in the
+   small grey meta row. */
+#f6p-fpl .f6p-stamp{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:14px;color:var(--f6p-ink-2);margin-bottom:6px}
+#f6p-fpl .f6p-stamp:empty{display:none}
+#f6p-fpl .f6p-stamp b{color:var(--f6p-ink);font-weight:600}
+#f6p-fpl .f6p-stamp .f6p-dl b{color:var(--f6p-accent)}
+#f6p-fpl .f6p-scroll{overflow:auto;max-height:70vh;border:1px solid var(--f6p-line);border-radius:9px;background:var(--f6p-surface)}
+#f6p-fpl .f6p-table{border-collapse:separate;border-spacing:0;width:100%;white-space:nowrap;font-variant-numeric:tabular-nums;margin:0}
+#f6p-fpl .f6p-table th,#f6p-fpl .f6p-table td{padding:8px 10px;text-align:right;border-bottom:1px solid var(--f6p-line-2);border-top:0}
+#f6p-fpl .f6p-table th{position:sticky;top:0;z-index:2;background:var(--f6p-head);cursor:pointer;font-family:var(--f6p-label);font-weight:600;font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:var(--f6p-head-fg);border-bottom:1px solid var(--f6p-line);user-select:none}
+#f6p-fpl .f6p-table th:hover,#f6p-fpl .f6p-table th.sorted{background:var(--f6p-head-active);color:var(--f6p-head-fg)}
+#f6p-fpl .f6p-table th.sorted::after{content:"\25BC";font-size:8px;margin-left:4px}
+#f6p-fpl .f6p-table th.sorted.asc::after{content:"\25B2"}
+#f6p-fpl .f6p-table td{font-size:13.5px}
+#f6p-fpl .f6p-txt{text-align:left}
+#f6p-fpl .f6p-table td.f6p-name,#f6p-fpl .f6p-table th.f6p-name{position:sticky;left:0;background:var(--f6p-surface);z-index:1;font-weight:600;text-align:left}
+#f6p-fpl .f6p-table th.f6p-name{z-index:3;background:var(--f6p-head);color:var(--f6p-head-fg)}
+#f6p-fpl .f6p-table th.f6p-name:hover,#f6p-fpl .f6p-table th.f6p-name.sorted{background:var(--f6p-head-active)}
+#f6p-fpl .f6p-table tbody tr:hover td{background:var(--f6p-accent-soft)}
+#f6p-fpl .f6p-pos{color:var(--f6p-ink-3);font-size:11.5px;font-weight:600;letter-spacing:.05em}
+#f6p-fpl .f6p-pct{color:var(--f6p-ink-2);font-size:12.5px}
+#f6p-fpl .f6p-xp{font-weight:700}
+#f6p-fpl .f6p-blank{color:var(--f6p-ink-3);font-style:italic}
+#f6p-fpl .f6p-table th.f6p-gstart,#f6p-fpl .f6p-table td.f6p-gstart{border-left:2px solid var(--f6p-rule)}
+#f6p-fpl .f6p-empty{padding:30px;text-align:center;color:var(--f6p-ink-3)}
+</style>
+
+<script>
+(function () {
+  "use strict";
+
+  /* NO "//" LINE COMMENTS IN THIS SCRIPT -- the build collapses it to one
+     line, and a "//" would swallow everything after it. */
+
+  /* Column groups: identity | playing time | xP | attack & defense |
+     points breakdown. gstart draws the vertical rule. dec = decimals shown.
+     tip = the header's hover text. */
+  var COLUMNS = [
+    {key:"player", label:"Player", type:"name"},
+    {key:"team", label:"Tm", type:"text"},
+    {key:"pos", label:"Pos", type:"pos"},
+    {key:"price", label:"£", type:"money", tip:"FPL price"},
+    {key:"rost", label:"Rost%", type:"pct", dec:1, tip:"Share of FPL managers rostering him"},
+    {key:"opp", label:"Opp", type:"opp", tip:"vs = home, @ = away"},
+    {key:"nfix", label:"Fix", type:"num", dec:0, rangeOnly:true, tip:"Fixtures in the range"},
+
+    {key:"xmins", label:"xMin", type:"num", dec:0, sum:true, gstart:true, tip:"Expected minutes"},
+    {key:"start", label:"Start%", type:"pct", dec:0, avg:true, tip:"Chance he starts"},
+    {key:"p60", label:"60+%", type:"pct", dec:0, avg:true, tip:"Chance he plays 60+ minutes"},
+
+    {key:"xp", label:"xP", type:"num", dec:2, sum:true, gstart:true, cls:"f6p-xp", tip:"Expected FPL points"},
+
+    {key:"xg", label:"xG", type:"num", dec:2, sum:true, gstart:true, tip:"Expected goals"},
+    {key:"xa", label:"xA", type:"num", dec:2, sum:true, tip:"Expected assists"},
+    {key:"cs", label:"CS%", type:"pct", dec:0, avg:true, tip:"Team clean sheet chance"},
+
+    {key:"app", label:"App", type:"num", dec:2, sum:true, gstart:true, tip:"Appearance points"},
+    {key:"gls", label:"Gls", type:"num", dec:2, sum:true, tip:"Goal points"},
+    {key:"ast", label:"Ast", type:"num", dec:2, sum:true, tip:"Assist points"},
+    {key:"csp", label:"CS", type:"num", dec:2, sum:true, tip:"Clean sheet points"},
+    {key:"gc", label:"GC", type:"num", dec:2, sum:true, tip:"Goals conceded deduction"},
+    {key:"sv", label:"Svs", type:"num", dec:2, sum:true, tip:"Save points"},
+    {key:"dc", label:"DC", type:"num", dec:2, sum:true, tip:"Defensive contribution points"},
+    {key:"bon", label:"Bon", type:"num", dec:2, sum:true, tip:"Bonus points"},
+    {key:"crd", label:"Crd", type:"num", dec:2, sum:true, tip:"Card deduction"}
+  ];
+  var SUM_KEYS = COLUMNS.filter(function (c) { return c.sum; }).map(function (c) { return c.key; });
+  var AVG_KEYS = COLUMNS.filter(function (c) { return c.avg; }).map(function (c) { return c.key; });
+  var POS_OPTIONS = ["GK", "DEF", "MID", "FWD"];
+
+  var host = document.getElementById("f6p-fpl");
+  var viewswitch = host.querySelector(".f6p-viewswitch");
+  var ctl = host.querySelector(".f6p-controls");
+  var meta = host.querySelector(".f6p-meta");
+  var stamp = host.querySelector(".f6p-stamp");
+  var hrow = host.querySelector("thead tr");
+  var tbody = host.querySelector("tbody");
+
+  var ROWS = [], GWS = [], TEAMS = [], META = {};
+  var view = "gw", basis = "total";
+  var posSet = new Set(POS_OPTIONS), team = "ALL", query = "", maxPrice = 0;
+  var gwFrom = null, gwTo = null;
+  var sortKey = "xp", sortAsc = false, visible = [], current = [];
+  var weekHolder, mCount, mRange, sDeadline;
+
+  /* Shown in the viewer's own time zone, e.g. "Wed, Nov 25, 10:47 AM EST". */
+  function when(iso) {
+    var d = new Date(iso);
+    if (isNaN(d)) { return ""; }
+    return d.toLocaleString(undefined, {weekday:"short", month:"short", day:"numeric",
+      hour:"numeric", minute:"2-digit", timeZoneName:"short"});
+  }
+  function stampPart(cls, label, value) {
+    var s = el("span", cls);
+    s.appendChild(document.createTextNode(label + " "));
+    s.appendChild(el("b", null, value));
+    return s;
+  }
+
+  function el(tag, cls, text) {
+    var n = document.createElement(tag);
+    if (cls) { n.className = cls; }
+    if (text !== undefined) { n.textContent = text; }
+    return n;
+  }
+  function opt(v, l, sel) {
+    var o = document.createElement("option");
+    o.value = v; o.textContent = l;
+    if (sel) { o.selected = true; }
+    return o;
+  }
+  function fail(msg) {
+    var tr = document.createElement("tr"), td = el("td", "f6p-empty", msg);
+    td.colSpan = COLUMNS.length; tr.appendChild(td); tbody.appendChild(tr);
+  }
+  function segButtons(parent, pairs, isOn, onClick) {
+    pairs.forEach(function (p) {
+      var b = el("button", isOn(p[0]) ? "on" : null, p[1]);
+      b.type = "button";
+      b.addEventListener("click", function () {
+        parent.querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
+        onClick(p[0]);
+      });
+      parent.appendChild(b);
+    });
+  }
+
+  Promise.resolve(__DATA_SOURCE__)
+    .then(function (data) {
+      META = data.meta || {};
+      ROWS = data.rows.map(function (r) {
+        var o = {};
+        for (var i = 0; i < data.cols.length; i++) { o[data.cols[i]] = r[i]; }
+        return o;
+      });
+      var g = {}, t = {};
+      ROWS.forEach(function (r) { g[r.gw] = 1; t[r.team] = 1; });
+      GWS = Object.keys(g).map(Number).sort(function (a, b) { return a - b; });
+      TEAMS = Object.keys(t).sort();
+      gwFrom = gwTo = GWS[0];
+      buildControls();
+      render();
+    })
+    .catch(function (err) {
+      fail("Projections are unavailable right now (" + err.message + ").");
+    });
+
+  function buildWeekControls() {
+    while (weekHolder.firstChild) { weekHolder.removeChild(weekHolder.firstChild); }
+    var gw = el("div", "f6p-grp");
+    gw.appendChild(el("label", null, view === "range" ? "Range" : "Gameweek"));
+    var selFrom = document.createElement("select");
+    GWS.forEach(function (w) { selFrom.appendChild(opt(w, "GW " + w, w === gwFrom)); });
+    gw.appendChild(selFrom);
+    if (view === "range") {
+      var selTo = document.createElement("select");
+      GWS.forEach(function (w) { selTo.appendChild(opt(w, "GW " + w, w === gwTo)); });
+      selFrom.addEventListener("change", function () {
+        gwFrom = Number(this.value);
+        if (gwTo < gwFrom) { gwTo = gwFrom; selTo.value = String(gwTo); }
+        render();
+      });
+      selTo.addEventListener("change", function () {
+        gwTo = Number(this.value);
+        if (gwFrom > gwTo) { gwFrom = gwTo; selFrom.value = String(gwFrom); }
+        render();
+      });
+      gw.appendChild(el("span", "f6p-dash", "to"));
+      gw.appendChild(selTo);
+    } else {
+      selFrom.addEventListener("change", function () {
+        gwFrom = gwTo = Number(this.value);
+        render();
+      });
+    }
+    weekHolder.appendChild(gw);
+
+    if (view === "range") {
+      var gb = el("div", "f6p-grp f6p-seg");
+      segButtons(gb, [["total", "Total"], ["avg", "Per GW"]],
+        function (k) { return basis === k; },
+        function (k) { basis = k; render(); });
+      weekHolder.appendChild(gb);
+    }
+  }
+
+  function buildControls() {
+    var seg = el("div", "f6p-grp f6p-seg");
+    segButtons(seg, [["gw", "Gameweek"], ["range", "Range"]],
+      function (k) { return view === k; },
+      function (k) {
+        view = k;
+        basis = "total";
+        sortKey = "xp"; sortAsc = false;
+        gwFrom = GWS[0];
+        gwTo = (view === "range") ? GWS[GWS.length - 1] : GWS[0];
+        buildWeekControls();
+        render();
+      });
+    viewswitch.appendChild(seg);
+
+    weekHolder = el("div", null);
+    weekHolder.style.display = "contents";
+    buildWeekControls();
+    ctl.appendChild(weekHolder);
+
+    /* Position is multi-select, same behaviour as the usage tool: from All,
+       clicking one isolates it; after that each one toggles. */
+    var gp = el("div", "f6p-grp f6p-seg");
+    var posBtns = {};
+    function syncPos() {
+      posBtns.ALL.classList.toggle("on", posSet.size === POS_OPTIONS.length);
+      POS_OPTIONS.forEach(function (p) { posBtns[p].classList.toggle("on", posSet.has(p)); });
+    }
+    posBtns.ALL = el("button", "on", "All");
+    posBtns.ALL.type = "button";
+    posBtns.ALL.addEventListener("click", function () {
+      POS_OPTIONS.forEach(function (p) { posSet.add(p); });
+      syncPos(); render();
+    });
+    gp.appendChild(posBtns.ALL);
+    POS_OPTIONS.forEach(function (p) {
+      var b = el("button", "on", p);
+      b.type = "button";
+      b.addEventListener("click", function () {
+        if (posSet.size === POS_OPTIONS.length) { posSet.clear(); posSet.add(p); }
+        else if (posSet.has(p)) { if (posSet.size > 1) { posSet.delete(p); } }
+        else { posSet.add(p); }
+        syncPos(); render();
+      });
+      gp.appendChild(b);
+      posBtns[p] = b;
+    });
+    ctl.appendChild(gp);
+
+    var gt = el("div", "f6p-grp");
+    gt.appendChild(el("label", null, "Team"));
+    var st = document.createElement("select");
+    st.appendChild(opt("ALL", "All teams", true));
+    TEAMS.forEach(function (t) { st.appendChild(opt(t, t)); });
+    st.addEventListener("change", function () { team = this.value; render(); });
+    gt.appendChild(st);
+    ctl.appendChild(gt);
+
+    var gm = el("div", "f6p-grp");
+    gm.appendChild(el("label", null, "Max £"));
+    var sm = document.createElement("select");
+    sm.appendChild(opt("0", "Any", true));
+    var top = Math.max.apply(null, ROWS.map(function (r) { return r.price; }));
+    for (var p = 4.5; p < top; p += 0.5) { sm.appendChild(opt(String(p), "£" + p.toFixed(1))); }
+    sm.addEventListener("change", function () { maxPrice = Number(this.value); render(); });
+    gm.appendChild(sm);
+    ctl.appendChild(gm);
+
+    var gs = el("div", "f6p-grp");
+    var search = document.createElement("input");
+    search.type = "search";
+    search.placeholder = "Search player…";
+    search.addEventListener("input", function () { query = this.value.trim().toLowerCase(); render(); });
+    gs.appendChild(search);
+    ctl.appendChild(gs);
+
+    var gc = el("div", "f6p-grp");
+    var csv = el("button", null, "Export CSV");
+    csv.type = "button";
+    csv.addEventListener("click", exportCsv);
+    gc.appendChild(csv);
+    ctl.appendChild(gc);
+
+    mCount = el("b", null, "");
+    mRange = el("span", null, "");
+    meta.appendChild(mCount);
+    meta.appendChild(mRange);
+
+    if (META.built_at && when(META.built_at)) {
+      stamp.appendChild(stampPart(null, "Updated", when(META.built_at)));
+    }
+    sDeadline = el("span", "f6p-dl");
+    stamp.appendChild(sDeadline);
+  }
+
+  /* Deadline of the first gameweek showing -- the one a reader is about to
+     make moves for. Rebuilt on every render since the gameweek can change. */
+  function renderDeadline() {
+    while (sDeadline.firstChild) { sDeadline.removeChild(sDeadline.firstChild); }
+    var iso = (META.deadlines || {})[String(gwFrom)];
+    if (!iso || !when(iso)) { return; }
+    var d = stampPart(null, "GW " + gwFrom + " deadline:", when(iso));
+    while (d.firstChild) { sDeadline.appendChild(d.firstChild); }
+  }
+
+  /* Range: sum the expected counts; Start%/60+%/CS% are averaged over the
+     fixtures actually played (a blank gameweek has no fixture to average). */
+  function aggregate(rows) {
+    var by = {}, order = [];
+    rows.forEach(function (r) {
+      var a = by[r.id];
+      if (!a) {
+        a = by[r.id] = { id: r.id, player: r.player, team: r.team, pos: r.pos, price: r.price,
+                         rost: r.rost, nfix: 0, gws: 0, _opp: [] };
+        SUM_KEYS.concat(AVG_KEYS).forEach(function (k) { a[k] = 0; });
+        order.push(r.id);
+      }
+      a.gws += 1;
+      a.nfix += r.nfix;
+      a._opp.push(r.nfix ? r.opp.replace(/vs /g, "").replace(/@ /g, "@") : "–");
+      SUM_KEYS.forEach(function (k) { a[k] += r[k]; });
+      AVG_KEYS.forEach(function (k) { a[k] += r[k] * r.nfix; });
+    });
+    return order.map(function (id) {
+      var a = by[id];
+      AVG_KEYS.forEach(function (k) { a[k] = a.nfix ? a[k] / a.nfix : 0; });
+      a.opp = a._opp.join(" ");
+      delete a._opp;
+      if (basis === "avg") {
+        SUM_KEYS.forEach(function (k) { a[k] = a[k] / a.gws; });
+      }
+      return a;
+    });
+  }
+
+  function fmt(c, v) {
+    if (v === undefined || v === null) { return "–"; }
+    if (c.type === "money") { return "£" + v.toFixed(1); }
+    if (c.type === "pct") { return v.toFixed(c.dec || 0) + "%"; }
+    if (c.type === "num") {
+      var s = v.toFixed(c.dec || 0);
+      return (s === "-0.00" || s === "-0") ? s.slice(1) : s;
+    }
+    return String(v);
+  }
+
+  function render() {
+    visible = COLUMNS.filter(function (c) { return view === "range" || !c.rangeOnly; });
+
+    var rows = ROWS.filter(function (r) {
+      if (r.gw < gwFrom || r.gw > gwTo) { return false; }
+      if (!posSet.has(r.pos)) { return false; }
+      if (team !== "ALL" && r.team !== team) { return false; }
+      if (maxPrice && r.price > maxPrice) { return false; }
+      if (query && r.player.toLowerCase().indexOf(query) === -1) { return false; }
+      return true;
+    });
+    if (view === "range") { rows = aggregate(rows); }
+
+    rows.sort(function (a, b) {
+      var x = a[sortKey], y = b[sortKey];
+      if (typeof x === "string" || typeof y === "string") {
+        x = String(x); y = String(y);
+        return sortAsc ? x.localeCompare(y) : y.localeCompare(x);
+      }
+      return sortAsc ? x - y : y - x;
+    });
+    current = rows;
+
+    while (hrow.firstChild) { hrow.removeChild(hrow.firstChild); }
+    visible.forEach(function (c) {
+      var th = el("th", null, (view === "range" && c.key === "opp") ? "Fixtures" : c.label);
+      if (c.tip) { th.title = c.tip; }
+      if (c.type === "name") { th.className = "f6p-name"; }
+      else if (c.type === "text" || c.type === "pos" || c.type === "opp") { th.className = "f6p-txt"; }
+      if (c.gstart) { th.classList.add("f6p-gstart"); }
+      if (c.key === sortKey) {
+        th.classList.add("sorted");
+        if (sortAsc) { th.classList.add("asc"); }
+      }
+      th.addEventListener("click", function () {
+        if (sortKey === c.key) { sortAsc = !sortAsc; }
+        else { sortKey = c.key; sortAsc = (c.type === "name" || c.type === "text" || c.type === "opp" || c.type === "pos"); }
+        render();
+      });
+      hrow.appendChild(th);
+    });
+
+    while (tbody.firstChild) { tbody.removeChild(tbody.firstChild); }
+    if (!rows.length) { fail("No players match those filters."); }
+    else {
+      var frag = document.createDocumentFragment();
+      rows.forEach(function (r) {
+        var tr = document.createElement("tr");
+        visible.forEach(function (c) {
+          var td = document.createElement("td");
+          if (c.type === "name") { td.className = "f6p-name"; }
+          else if (c.type === "text" || c.type === "opp") { td.className = "f6p-txt"; }
+          else if (c.type === "pos") { td.className = "f6p-txt f6p-pos"; }
+          else if (c.type === "pct") { td.className = "f6p-pct"; }
+          if (c.cls) { td.classList.add(c.cls); }
+          if (c.gstart) { td.classList.add("f6p-gstart"); }
+          if (c.key === "opp" && r.opp === "BLANK") { td.classList.add("f6p-blank"); }
+          td.textContent = fmt(c, r[c.key]);
+          tr.appendChild(td);
+        });
+        frag.appendChild(tr);
+      });
+      tbody.appendChild(frag);
+    }
+
+    renderDeadline();
+    mCount.textContent = rows.length.toLocaleString() + " players";
+    mRange.textContent = ((gwFrom === gwTo) ? "GW " + gwFrom : "GW " + gwFrom + "–" + gwTo) +
+      (view === "range" ? (basis === "avg" ? " · per GW" : " · totals") : "");
+  }
+
+  function exportCsv() {
+    var out = [visible.map(function (c) {
+      return (view === "range" && c.key === "opp") ? "Fixtures" : c.label;
+    }).join(",")];
+    current.forEach(function (r) {
+      out.push(visible.map(function (c) {
+        var v = r[c.key];
+        if (v === undefined || v === null) { return ""; }
+        v = (c.type === "num" || c.type === "money" || c.type === "pct") ? v.toFixed(c.type === "money" ? 1 : (c.dec || 0)) : String(v);
+        return /[",]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+      }).join(","));
+    });
+    out.push("");
+    out.push("Prediction data powered by FPL Copilot (fplcopilot.com)");
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob(["﻿" + out.join("\n")], { type: "text/csv;charset=utf-8" }));
+    a.download = "f6p-fpl-projections-" + (view === "range" ? "gw" + gwFrom + "-" + gwTo + (basis === "avg" ? "-pergw" : "") : "gw" + gwFrom) + ".csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(a.href);
+  }
+})();
+</script>
+<!-- F6P_FPL:END -->

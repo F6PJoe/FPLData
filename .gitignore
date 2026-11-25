@@ -1,0 +1,9 @@
+.env
+raw/
+refresh.log
+data/
+samples/
+__pycache__/
+*.pyc
+projections_table.html
+wp_page.html

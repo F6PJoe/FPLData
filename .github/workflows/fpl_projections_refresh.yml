@@ -1,0 +1,91 @@
+name: FPL Projections Refresh
+
+# Keeps fantasysixpack.net/fpl-projections/ current. FPL deadlines move around
+# week to week, so this does not follow the fixture calendar: it checks FPL
+# Copilot every 2 hours and only rebuilds + uploads when their numbers changed
+# or the next gameweek rolled over (refresh.py). A check that finds nothing new
+# costs one tiny API call and uploads nothing, so running often -- or twice at
+# once -- is harmless.
+#
+# No native `schedule:` trigger -- driven by cron-job.org hitting
+# workflow_dispatch, same as the workflows in the NFLData repo:
+#   job 1: every 2 hours, no inputs            -> check, publish only on change
+#   job 2: daily 07:05 UTC, input force=true   -> forced rebuild, because price
+#          changes and Rost% come from FPL's own site, so FPL Copilot's version
+#          check can't see them move.
+# Also runnable by hand from the Actions tab (tick "force" to rebuild anyway).
+#
+# Required repo secrets (Settings -> Secrets and variables -> Actions). Secrets
+# are per-repo, so these must be added to THIS repo even though the SFTP ones
+# also exist in NFLData:
+#   FPL_COPILOT_KEY   -- the FPL Copilot partner API key (X-Partner-Key value).
+#   SFTP_HOST, SFTP_PORT, SFTP_USERNAME, SFTP_REMOTE_ROOT, SFTP_KEY,
+#   SFTP_KEY_PASSPHRASE -- same values as NFLData's (same SiteGround account).
+#     SFTP_KEY is the OpenSSH-format private key's full file contents.
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Rebuild and upload even if nothing changed"
+        type: boolean
+        default: false
+
+concurrency:
+  group: fpl-projections-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write credentials
+        env:
+          FPL_COPILOT_KEY:     ${{ secrets.FPL_COPILOT_KEY }}
+          SFTP_KEY:            ${{ secrets.SFTP_KEY }}
+          SFTP_KEY_PASSPHRASE: ${{ secrets.SFTP_KEY_PASSPHRASE }}
+          SFTP_HOST:           ${{ secrets.SFTP_HOST }}
+          SFTP_PORT:           ${{ secrets.SFTP_PORT }}
+          SFTP_USERNAME:       ${{ secrets.SFTP_USERNAME }}
+          SFTP_REMOTE_ROOT:    ${{ secrets.SFTP_REMOTE_ROOT }}
+        run: |
+          echo "${SFTP_KEY}" > "${RUNNER_TEMP}/sftp_key"
+          chmod 600 "${RUNNER_TEMP}/sftp_key"
+
+          cat > .env <<EOF
+          FPL_COPILOT_KEY=${FPL_COPILOT_KEY}
+          SFTP_HOST=${SFTP_HOST}
+          SFTP_PORT=${SFTP_PORT}
+          SFTP_USERNAME=${SFTP_USERNAME}
+          SFTP_REMOTE_ROOT=${SFTP_REMOTE_ROOT}
+          SFTP_KEY_PATH=${RUNNER_TEMP}/sftp_key
+          SFTP_KEY_PASSPHRASE=${SFTP_KEY_PASSPHRASE}
+          EOF
+
+      - name: Check FPL Copilot; rebuild and upload only if changed
+        env:
+          # Forced when cron-job.org's daily job (or a manual run) sets force.
+          FORCE: ${{ inputs.force && 'yes' || '' }}
+        run: |
+          if [ -n "$FORCE" ]; then python refresh.py --force; else python refresh.py; fi
+
+      - name: Keep the log as an artifact (for debugging)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fpl-refresh-log
+          path: refresh.log
+          retention-days: 7
+          if-no-files-found: ignore
